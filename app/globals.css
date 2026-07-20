@@ -1,0 +1,63 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-display: 'Playfair Display', Georgia, serif;
+  --font-body: 'Inter', Helvetica, Arial, sans-serif;
+  --font-data: 'IBM Plex Mono', Menlo, monospace;
+}
+
+html, body {
+  background-color: #F7F4EC;
+  color: #1A1D26;
+}
+
+/* ---------------------------------------------------------------
+   Signature motif: stamp-perforation edge.
+   A row of "punched" dots in the canvas colour, used to seam
+   card headers to their bodies — a quiet nod to philately rather
+   than a literal stamp graphic.
+------------------------------------------------------------------*/
+.perf {
+  position: relative;
+  height: 10px;
+  width: 100%;
+}
+.perf::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle, #F7F4EC 2.6px, transparent 2.7px);
+  background-size: 16px 10px;
+  background-position: 8px center;
+  background-repeat: repeat-x;
+}
+.perf-navy::before { background-image: radial-gradient(circle, #132345 2.6px, transparent 2.7px); }
+.perf-canvas::before { background-image: radial-gradient(circle, #F7F4EC 2.6px, transparent 2.7px); }
+.perf-paper::before { background-image: radial-gradient(circle, #FFFFFF 2.6px, transparent 2.7px); }
+
+/* Perforated card edge — the top of every KPI card is "torn" from a sheet */
+.perf-card {
+  position: relative;
+}
+.perf-card::before {
+  content: '';
+  position: absolute;
+  top: -1px;
+  left: 0;
+  right: 0;
+  height: 10px;
+  background-image: radial-gradient(circle, #F7F4EC 2.6px, transparent 2.7px);
+  background-size: 16px 10px;
+  background-position: 8px center;
+  background-repeat: repeat-x;
+  transform: translateY(-50%);
+}
+
+.scrollbar-thin::-webkit-scrollbar { height: 6px; width: 6px; }
+.scrollbar-thin::-webkit-scrollbar-thumb { background: #E4DECD; border-radius: 4px; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+}
