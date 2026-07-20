@@ -9,6 +9,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   const entry = await addEntry({
     kpiId: params.id,
     quarter: body.quarter,
+    category: body.category ?? 'Company',
     value: Number(body.value),
     note: body.note ?? null,
   });
