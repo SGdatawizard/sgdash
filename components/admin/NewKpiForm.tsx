@@ -38,7 +38,7 @@ export default function NewKpiForm({ onCreated }: { onCreated: () => void }) {
       const res = await fetch('/api/kpis', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...form, targetValue: null, sortOrder: 99 }),
+        body: JSON.stringify({ ...form, sortOrder: 99 }),
       });
       if (!res.ok) throw new Error((await res.json()).error ?? 'Could not create KPI');
       setForm(empty);

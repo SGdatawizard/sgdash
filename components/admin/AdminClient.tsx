@@ -1,11 +1,11 @@
 'use client';
 
 import { useCallback, useState } from 'react';
-import type { KpiWithEntries } from '@/lib/types';
+import type { KpiWithData } from '@/lib/types';
 import KpiAdminCard from './KpiAdminCard';
 import NewKpiForm from './NewKpiForm';
 
-export default function AdminClient({ initialKpis }: { initialKpis: KpiWithEntries[] }) {
+export default function AdminClient({ initialKpis }: { initialKpis: KpiWithData[] }) {
   const [kpis, setKpis] = useState(initialKpis);
 
   const refresh = useCallback(async () => {
@@ -25,7 +25,7 @@ export default function AdminClient({ initialKpis }: { initialKpis: KpiWithEntri
         <div className="text-[11px] uppercase tracking-wide2 text-gold-dark mb-1">Data Entry</div>
         <h1 className="font-display text-3xl text-navy">Update KPI readings</h1>
         <p className="text-sm text-ink/60 mt-1.5 max-w-xl">
-          Record each quarter&rsquo;s figure per KPI. Changes appear on the dashboard immediately.
+          Record each quarter&rsquo;s figure per KPI, by category. Changes appear on the dashboard immediately.
         </p>
       </div>
 

@@ -1,51 +1,63 @@
-import type { KpiWithEntries, Status } from './types';
+import type { Category, KpiWithData, Status } from './types';
 
-export interface KpiComputed {
+export interface CategorySeriesPoint {
+  quarter: string;
+  value: number;
+}
+
+export interface CategoryComputed {
+  category: Category;
+  series: CategorySeriesPoint[];
   latest: number | null;
   previous: number | null;
-  baseline: number | null;
+  target: number | null;
   deltaVsPrevious: number | null;
-  deltaVsBaseline: number | null;
-  pctChangeVsPrevious: number | null;
+  /** How close `latest` is to `target`, 100 = met or exceeded. Null if no target set. */
+  progressPct: number | null;
   status: Status;
 }
 
-export function computeKpi(kpi: KpiWithEntries): KpiComputed {
-  const entries = kpi.entries;
-  if (entries.length === 0) {
+const AT_RISK_THRESHOLD = 85; // progressPct below 100 but at/above this reads as "close, but flat"
+
+/** Compute trend + target-progress for one KPI, filtered to a single category. */
+export function computeCategory(kpi: KpiWithData, category: Category): CategoryComputed {
+  const series = kpi.entries
+    .filter((e) => e.category === category)
+    .sort((a, b) => a.quarter.localeCompare(b.quarter))
+    .map((e) => ({ quarter: e.quarter, value: e.value }));
+
+  const target = kpi.targets.find((t) => t.category === category)?.targetValue ?? null;
+
+  if (series.length === 0) {
     return {
-      latest: null,
-      previous: null,
-      baseline: null,
-      deltaVsPrevious: null,
-      deltaVsBaseline: null,
-      pctChangeVsPrevious: null,
-      status: 'no-data',
+      category, series, latest: null, previous: null, target,
+      deltaVsPrevious: null, progressPct: null, status: 'no-data',
     };
   }
 
-  const baseline = entries[0].value;
-  const latest = entries[entries.length - 1].value;
-  const previous = entries.length > 1 ? entries[entries.length - 2].value : null;
-
+  const latest = series[series.length - 1].value;
+  const previous = series.length > 1 ? series[series.length - 2].value : null;
   const deltaVsPrevious = previous !== null ? latest - previous : null;
-  const deltaVsBaseline = latest - baseline;
-  const pctChangeVsPrevious =
-    previous !== null && previous !== 0 ? ((latest - previous) / Math.abs(previous)) * 100 : null;
 
-  const favourable = (delta: number) => (kpi.direction === 'increase' ? delta > 0 : delta < 0);
-  const unfavourable = (delta: number) => (kpi.direction === 'increase' ? delta < 0 : delta > 0);
+  let progressPct: number | null = null;
+  let status: Status;
 
-  let status: Status = 'on-track';
-  if (entries.length < 2) {
+  if (target !== null) {
+    if (kpi.direction === 'increase') {
+      progressPct = target !== 0 ? (latest / target) * 100 : null;
+      status = latest >= target ? 'on-track' : (progressPct ?? 0) >= AT_RISK_THRESHOLD ? 'at-risk' : 'behind';
+    } else {
+      progressPct = latest !== 0 ? (target / latest) * 100 : null;
+      status = latest <= target ? 'on-track' : (progressPct ?? 0) >= AT_RISK_THRESHOLD ? 'at-risk' : 'behind';
+    }
+  } else if (deltaVsPrevious === null) {
     status = 'on-track';
-  } else if (deltaVsPrevious !== null) {
-    if (favourable(deltaVsPrevious)) status = 'on-track';
-    else if (deltaVsPrevious === 0) status = 'at-risk';
-    else if (unfavourable(deltaVsPrevious)) status = 'behind';
+  } else {
+    const favourable = kpi.direction === 'increase' ? deltaVsPrevious > 0 : deltaVsPrevious < 0;
+    status = favourable ? 'on-track' : deltaVsPrevious === 0 ? 'at-risk' : 'behind';
   }
 
-  return { latest, previous, baseline, deltaVsPrevious, deltaVsBaseline, pctChangeVsPrevious, status };
+  return { category, series, latest, previous, target, deltaVsPrevious, progressPct, status };
 }
 
 export const STATUS_LABEL: Record<Status, string> = {

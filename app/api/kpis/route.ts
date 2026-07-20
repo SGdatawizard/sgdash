@@ -22,7 +22,6 @@ export async function POST(req: NextRequest) {
     targetLabel: body.targetLabel,
     measure: body.measure,
     method: body.method,
-    targetValue: body.targetValue ?? null,
     sortOrder: body.sortOrder ?? 99,
   });
   return NextResponse.json(kpi, { status: 201 });

@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import { supabase } from './supabase';
-import type { Kpi, KpiEntry, KpiWithEntries } from './types';
+import type { Kpi, KpiEntry, KpiWithData, Target, Category } from './types';
 
 // --- row <-> domain-type mapping (Postgres columns are snake_case) ---
 
@@ -13,7 +13,6 @@ interface KpiRow {
   target_label: string;
   measure: string;
   method: string;
-  target_value: number | null;
   sort_order: number;
 }
 
@@ -21,9 +20,18 @@ interface EntryRow {
   id: string;
   kpi_id: string;
   quarter: string;
+  category: string;
   value: number;
   note: string | null;
   created_at: string;
+}
+
+interface TargetRow {
+  id: string;
+  kpi_id: string;
+  category: string;
+  target_value: number;
+  updated_at: string;
 }
 
 function kpiFromRow(r: KpiRow): Kpi {
@@ -36,7 +44,6 @@ function kpiFromRow(r: KpiRow): Kpi {
     targetLabel: r.target_label,
     measure: r.measure,
     method: r.method,
-    targetValue: r.target_value,
     sortOrder: r.sort_order,
   };
 }
@@ -46,9 +53,20 @@ function entryFromRow(r: EntryRow): KpiEntry {
     id: r.id,
     kpiId: r.kpi_id,
     quarter: r.quarter,
+    category: r.category as Category,
     value: Number(r.value),
     note: r.note,
     createdAt: r.created_at,
+  };
+}
+
+function targetFromRow(r: TargetRow): Target {
+  return {
+    id: r.id,
+    kpiId: r.kpi_id,
+    category: r.category as Category,
+    targetValue: Number(r.target_value),
+    updatedAt: r.updated_at,
   };
 }
 
@@ -59,7 +77,7 @@ function slugify(name: string): string {
 
 // --- reads ---
 
-export async function getAllKpis(): Promise<KpiWithEntries[]> {
+export async function getAllKpis(): Promise<KpiWithData[]> {
   const { data: kpiRows, error: kpiError } = await supabase
     .from('kpis')
     .select('*')
@@ -72,6 +90,11 @@ export async function getAllKpis(): Promise<KpiWithEntries[]> {
     .order('quarter', { ascending: true });
   if (entryError) throw entryError;
 
+  const { data: targetRows, error: targetError } = await supabase
+    .from('targets')
+    .select('*');
+  if (targetError) throw targetError;
+
   const entriesByKpi = new Map<string, EntryRow[]>();
   for (const e of entryRows ?? []) {
     const list = entriesByKpi.get(e.kpi_id) ?? [];
@@ -79,13 +102,21 @@ export async function getAllKpis(): Promise<KpiWithEntries[]> {
     entriesByKpi.set(e.kpi_id, list);
   }
 
+  const targetsByKpi = new Map<string, TargetRow[]>();
+  for (const t of targetRows ?? []) {
+    const list = targetsByKpi.get(t.kpi_id) ?? [];
+    list.push(t);
+    targetsByKpi.set(t.kpi_id, list);
+  }
+
   return (kpiRows ?? []).map((k) => ({
     ...kpiFromRow(k),
     entries: (entriesByKpi.get(k.id) ?? []).map(entryFromRow),
+    targets: (targetsByKpi.get(k.id) ?? []).map(targetFromRow),
   }));
 }
 
-export async function getKpi(id: string): Promise<KpiWithEntries | null> {
+export async function getKpi(id: string): Promise<KpiWithData | null> {
   const { data: kpiRow, error: kpiError } = await supabase
     .from('kpis')
     .select('*')
@@ -101,10 +132,20 @@ export async function getKpi(id: string): Promise<KpiWithEntries | null> {
     .order('quarter', { ascending: true });
   if (entryError) throw entryError;
 
-  return { ...kpiFromRow(kpiRow), entries: (entryRows ?? []).map(entryFromRow) };
+  const { data: targetRows, error: targetError } = await supabase
+    .from('targets')
+    .select('*')
+    .eq('kpi_id', id);
+  if (targetError) throw targetError;
+
+  return {
+    ...kpiFromRow(kpiRow),
+    entries: (entryRows ?? []).map(entryFromRow),
+    targets: (targetRows ?? []).map(targetFromRow),
+  };
 }
 
-// --- writes ---
+// --- writes: KPIs ---
 
 export async function createKpi(input: Omit<Kpi, 'id'>): Promise<Kpi> {
   const id = slugify(input.name);
@@ -119,7 +160,6 @@ export async function createKpi(input: Omit<Kpi, 'id'>): Promise<Kpi> {
       target_label: input.targetLabel,
       measure: input.measure,
       method: input.method,
-      target_value: input.targetValue,
       sort_order: input.sortOrder,
     })
     .select()
@@ -137,7 +177,6 @@ export async function updateKpi(id: string, input: Partial<Omit<Kpi, 'id'>>): Pr
   if (input.targetLabel !== undefined) patch.target_label = input.targetLabel;
   if (input.measure !== undefined) patch.measure = input.measure;
   if (input.method !== undefined) patch.method = input.method;
-  if (input.targetValue !== undefined) patch.target_value = input.targetValue;
   if (input.sortOrder !== undefined) patch.sort_order = input.sortOrder;
 
   const { error } = await supabase.from('kpis').update(patch).eq('id', id);
@@ -145,18 +184,29 @@ export async function updateKpi(id: string, input: Partial<Omit<Kpi, 'id'>>): Pr
 }
 
 export async function deleteKpi(id: string): Promise<void> {
-  // entries.kpi_id has ON DELETE CASCADE, so this removes its readings too
+  // entries.kpi_id and targets.kpi_id both cascade, so this removes
+  // its readings and targets too
   const { error } = await supabase.from('kpis').delete().eq('id', id);
   if (error) throw error;
 }
 
-export async function addEntry(input: Omit<KpiEntry, 'id' | 'createdAt'>): Promise<KpiEntry> {
-  // One reading per KPI per quarter — re-saving the same quarter overwrites it.
+// --- writes: quarterly readings ---
+
+export async function addEntry(
+  input: Omit<KpiEntry, 'id' | 'createdAt'>
+): Promise<KpiEntry> {
+  // One reading per KPI + quarter + category — re-saving overwrites it.
   const { data, error } = await supabase
     .from('entries')
     .upsert(
-      { kpi_id: input.kpiId, quarter: input.quarter, value: input.value, note: input.note },
-      { onConflict: 'kpi_id,quarter' }
+      {
+        kpi_id: input.kpiId,
+        quarter: input.quarter,
+        category: input.category,
+        value: input.value,
+        note: input.note,
+      },
+      { onConflict: 'kpi_id,quarter,category' }
     )
     .select()
     .single();
@@ -166,5 +216,29 @@ export async function addEntry(input: Omit<KpiEntry, 'id' | 'createdAt'>): Promi
 
 export async function deleteEntry(id: string): Promise<void> {
   const { error } = await supabase.from('entries').delete().eq('id', id);
+  if (error) throw error;
+}
+
+// --- writes: targets ---
+
+export async function setTarget(
+  kpiId: string,
+  category: Category,
+  targetValue: number
+): Promise<Target> {
+  const { data, error } = await supabase
+    .from('targets')
+    .upsert(
+      { kpi_id: kpiId, category, target_value: targetValue, updated_at: new Date().toISOString() },
+      { onConflict: 'kpi_id,category' }
+    )
+    .select()
+    .single();
+  if (error) throw error;
+  return targetFromRow(data);
+}
+
+export async function deleteTarget(kpiId: string, category: Category): Promise<void> {
+  const { error } = await supabase.from('targets').delete().eq('kpi_id', kpiId).eq('category', category);
   if (error) throw error;
 }
