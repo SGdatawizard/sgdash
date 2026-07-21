@@ -7,10 +7,10 @@ import { CATEGORIES } from './types';
  * dashboard. Confirmed schema (from sg-auctions/src/lib/types/database.ts):
  *
  *   auctions: id, date, auction_category, total_lots, lots_sold, ...
- *   lots:     id, auction_id, category (a real ~65-value taxonomy — see
- *             CATEGORY_MAP below), sold (boolean), hammer_price (numeric),
- *             commission_rate (text, e.g. "10%" — see parseCommissionRate
- *             in sg-auctions/src/app/dashboard/analytics/financials/page.tsx,
+ *   lots:     id, auction_id, category ('Stamps' | 'Coins' | 'Pop Culture'),
+ *             sold (boolean), hammer_price (numeric), commission_rate
+ *             (text, e.g. "10%" — see parseCommissionRate in
+ *             sg-auctions/src/app/dashboard/analytics/financials/page.tsx,
  *             which this mirrors)
  */
 
@@ -85,13 +85,13 @@ async function fetchLotsForAuctions(auctionIds: string[], columns: string): Prom
  * sg-auctions doesn't store lots under "Stamps"/"Coins"/"Pop Culture" —
  * it uses a much finer real-world taxonomy (confirmed via /api/debug-data
  * against the live table: ~65 distinct values). This maps each raw
- * category string to one of our three business categories. Anything not
- * listed here (chiefly the Medals & Militaria sub-categories, and a
- * handful of generic "Miscellaneous" ones) is deliberately left
- * unmapped — those lots still count toward the Company-wide total
- * (which doesn't filter by category at all) but are excluded from the
- * Stamps/Coins/Pop Culture breakdowns until there's a decision on where
- * they belong.
+ * category string to one of our three business categories. Medals &
+ * Militaria sub-categories are folded into Coins (the common
+ * departmental pairing at traditional auction houses). Anything else
+ * not listed here (generic "Miscellaneous" lots) is deliberately left
+ * unmapped — those still count toward the Company-wide total (which
+ * doesn't filter by category at all) but are excluded from the
+ * Stamps/Coins/Pop Culture breakdowns.
  */
 const CATEGORY_MAP: Record<string, Category> = {
   // Stamps
@@ -110,12 +110,24 @@ const CATEGORY_MAP: Record<string, Category> = {
   'ephemera, literature, other': 'Stamps',
   magazines: 'Stamps',
 
-  // Coins
+  // Coins (incl. Medals & Militaria — folded in here, the common
+  // departmental pairing at traditional auction houses)
   coins: 'Coins',
   'british coins': 'Coins',
   'world coins': 'Coins',
   tokens: 'Coins',
   'ancient coins': 'Coins',
+  'world orders decorations and medals': 'Coins',
+  'single campaign medals': 'Coins',
+  militaria: 'Coins',
+  'medals & medallions': 'Coins',
+  'campaign groups and pairs': 'Coins',
+  'groups and single decorations for gallantry': 'Coins',
+  'long & meritorious service medals': 'Coins',
+  'miniature medals': 'Coins',
+  'medals awarded to women': 'Coins',
+  'orders and decorations': 'Coins',
+  'coronation and jubilee medals': 'Coins',
 
   // Pop Culture — trading card games, comics, animation/original art
   'pokemon graded single': 'Pop Culture',
@@ -155,9 +167,9 @@ const CATEGORY_MAP: Record<string, Category> = {
 };
 
 /** Maps a lot's raw sg-auctions category to our Stamps/Coins/Pop Culture
- *  scheme, or null if it isn't in the map yet (Medals & Militaria,
- *  generic "Miscellaneous", etc.) — those lots are excluded from
- *  category-specific totals but still count toward Company. */
+ *  scheme, or null if it isn't in the map yet (generic "Miscellaneous",
+ *  etc.) — those lots are excluded from category-specific totals but
+ *  still count toward Company. */
 function mapToBusinessCategory(raw: string | null): Category | null {
   if (!raw) return null;
   return CATEGORY_MAP[raw.trim().toLowerCase()] ?? null;
