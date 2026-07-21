@@ -2,25 +2,31 @@ import { auctionSupabase } from './auction-supabase';
 import type { Category } from './types';
 
 /**
- * Bridge between the Auction Performance app and this dashboard.
+ * Bridge between the Auction Performance app (sg-auctions) and this
+ * dashboard. Confirmed schema (from sg-auctions/src/lib/types/database.ts):
  *
- * TODO (needs the real table/column names from the Auction Performance
- * app before this does anything): the functions below are scaffolding,
- * not a working integration yet. Once you can tell me:
- *   1. the table/view name(s) that hold sell-through rate & market
- *      share by category and quarter (or the raw lot-level data to
- *      compute them from), and
- *   2. the column names for category, quarter/date, hammer price,
- *      estimate, lot count, etc.
- * I'll fill in the query below for real and wire up the "Pull latest
- * from Auction Performance" button this file is meant to support.
+ *   auctions: id, date, auction_category, total_lots, lots_sold, ...
+ *   lots:     id, auction_id, category ('Stamps' | 'Coins' | 'Pop Culture'),
+ *             sold (boolean), hammer_price (numeric)
  *
- * The shape every function here should end up returning is the same:
- * a single number for a given KPI + category + quarter, ready to be
- * written straight into `entries` via `addEntry`.
+ * lots.category matches our Category values exactly, so no mapping is
+ * needed there. Quarters aren't stored directly — auctions only have a
+ * `date` — so we convert "YYYY-Qn" to a date range and join through
+ * auction_id to find the lots that fall in it.
  */
 
 export type SyncableKpi = 'sell-through-rate' | 'market-share';
+
+function quarterToDateRange(quarter: string): { start: string; end: string } {
+  const match = quarter.match(/^(\d{4})-Q([1-4])$/);
+  if (!match) throw new Error(`Unrecognised quarter format: "${quarter}"`);
+  const year = Number(match[1]);
+  const q = Number(match[2]);
+  const startMonth = (q - 1) * 3; // 0-indexed
+  const start = new Date(Date.UTC(year, startMonth, 1));
+  const end = new Date(Date.UTC(year, startMonth + 3, 1));
+  return { start: start.toISOString().slice(0, 10), end: end.toISOString().slice(0, 10) };
+}
 
 export async function fetchAuctionMetric(
   kpi: SyncableKpi,
@@ -37,29 +43,50 @@ export async function fetchAuctionMetric(
 }
 
 async function fetchSellThroughRate(category: Category, quarter: string): Promise<number | null> {
-  // EXAMPLE ONLY — replace 'lots' / column names with the real schema.
-  //
-  // const { data, error } = await auctionSupabase
-  //   .from('lots')
-  //   .select('sold')
-  //   .eq('category', category)
-  //   .eq('quarter', quarter);
-  // if (error) throw error;
-  // if (!data || data.length === 0) return null;
-  // const sold = data.filter((l) => l.sold).length;
-  // return (sold / data.length) * 100;
+  const { start, end } = quarterToDateRange(quarter);
 
-  throw new Error(
-    'fetchSellThroughRate is not wired up yet — see the TODO in lib/auction-sync.ts'
-  );
+  const { data: auctions, error: auctionsError } = await auctionSupabase
+    .from('auctions')
+    .select('id')
+    .gte('date', start)
+    .lt('date', end);
+  if (auctionsError) throw auctionsError;
+  if (!auctions || auctions.length === 0) return null;
+
+  const auctionIds = auctions.map((a) => a.id);
+
+  let totalQuery = auctionSupabase
+    .from('lots')
+    .select('*', { count: 'exact', head: true })
+    .in('auction_id', auctionIds);
+  let soldQuery = auctionSupabase
+    .from('lots')
+    .select('*', { count: 'exact', head: true })
+    .in('auction_id', auctionIds)
+    .eq('sold', true);
+
+  if (category !== 'Company') {
+    totalQuery = totalQuery.eq('category', category);
+    soldQuery = soldQuery.eq('category', category);
+  }
+
+  const [{ count: totalCount, error: totalError }, { count: soldCount, error: soldError }] =
+    await Promise.all([totalQuery, soldQuery]);
+  if (totalError) throw totalError;
+  if (soldError) throw soldError;
+
+  if (!totalCount) return null;
+  return ((soldCount ?? 0) / totalCount) * 100;
 }
 
-async function fetchMarketShare(category: Category, quarter: string): Promise<number | null> {
-  // EXAMPLE ONLY — replace with the real schema. Market share is
-  // described as "measured on hammer / number of lots offered" in the
-  // 2026 plan, so this likely needs to pull hammer totals from the
-  // auction app and combine them with an external market-size figure.
+async function fetchMarketShare(_category: Category, _quarter: string): Promise<number | null> {
+  // sg-auctions has our own hammer totals and lot counts, but "market
+  // share versus key competitors" (per the 2026 plan) needs a total
+  // market-size figure to divide by — competitor sales aren't tracked
+  // anywhere in this system. There's nothing to silently substitute
+  // here without producing a misleading number, so this stays manual
+  // in Data Entry until there's a market-size source to pull from.
   throw new Error(
-    'fetchMarketShare is not wired up yet — see the TODO in lib/auction-sync.ts'
+    'Market Share needs a total-market benchmark that sg-auctions doesn\u2019t track (only our own hammer totals). Enter this one manually for now.'
   );
 }
