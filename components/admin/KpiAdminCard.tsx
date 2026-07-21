@@ -52,7 +52,7 @@ export default function KpiAdminCard({
     onChanged();
   }
 
-  const syncable = kpi.id === 'sell-through-rate' || kpi.id === 'market-share';
+  const syncable = kpi.id === 'sell-through-rate' || kpi.id === 'vendor-commission';
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
 
@@ -153,6 +153,8 @@ export default function KpiAdminCard({
             </div>
           )}
 
+          {kpi.id === 'market-share' && <MarketShareSnapshot quarter={quarter} />}
+
           <TargetsEditor kpi={kpi} onChanged={onChanged} />
         </div>
 
@@ -188,6 +190,72 @@ export default function KpiAdminCard({
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function formatGBP(n: number): string {
+  return `£${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+}
+
+function MarketShareSnapshot({ quarter }: { quarter: string }) {
+  const [rows, setRows] = useState<{ category: string; hammerValue: number; lotsOffered: number }[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function load() {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/auction-snapshot?quarter=${quarter}`);
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error ?? 'Could not load snapshot');
+      setRows(body);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="mt-4 pt-4 border-t border-line">
+      <div className="flex items-center justify-between">
+        <div className="text-[10px] uppercase tracking-wide2 text-ink/40">
+          Auction snapshot — {quarter}
+        </div>
+        <button
+          onClick={load}
+          disabled={loading}
+          className="text-xs uppercase tracking-wide2 px-3 py-1.5 rounded-sm border border-navy/30 text-navy hover:bg-navy hover:text-white disabled:opacity-50 transition-colors"
+        >
+          {loading ? 'Loading…' : rows ? 'Refresh' : 'Load from Auction Performance'}
+        </button>
+      </div>
+      {error && <p className="text-xs text-bad mt-2">{error}</p>}
+      {rows && (
+        <table className="w-full mt-3 text-sm">
+          <thead>
+            <tr className="text-[10px] uppercase tracking-wide2 text-ink/40 text-left">
+              <th className="font-normal pb-1.5">Category</th>
+              <th className="font-normal pb-1.5 text-right">Hammer value</th>
+              <th className="font-normal pb-1.5 text-right">Lots offered</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.category} className="border-t border-line/70">
+                <td className="py-1.5 text-navy font-medium">{r.category}</td>
+                <td className="py-1.5 text-right font-data">{formatGBP(r.hammerValue)}</td>
+                <td className="py-1.5 text-right font-data">{r.lotsOffered}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <p className="text-[11px] text-ink/40 mt-2">
+        Informational only — enter whatever market share figure you land on into the field above by hand.
+      </p>
     </div>
   );
 }

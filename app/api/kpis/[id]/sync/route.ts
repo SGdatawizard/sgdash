@@ -3,7 +3,7 @@ import { addEntry } from '@/lib/kpi-service';
 import { fetchAuctionMetric, type SyncableKpi } from '@/lib/auction-sync';
 import type { Category } from '@/lib/types';
 
-const SYNCABLE: SyncableKpi[] = ['sell-through-rate', 'market-share'];
+const SYNCABLE: SyncableKpi[] = ['sell-through-rate', 'vendor-commission'];
 
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   if (!SYNCABLE.includes(params.id as SyncableKpi)) {
