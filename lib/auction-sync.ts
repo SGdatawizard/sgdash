@@ -81,15 +81,28 @@ async function fetchLotsForAuctions(auctionIds: string[], columns: string): Prom
   return results;
 }
 
+function normalizeCategoryString(raw: string | null): string {
+  return (raw ?? '').trim().toLowerCase();
+}
+
+/** Matches a lot's raw category string against our canonical Category,
+ *  ignoring case and surrounding whitespace. sg-auctions' own data entry
+ *  isn't guaranteed to store "Pop Culture" with that exact casing/spacing
+ *  every time, so an exact === comparison can silently drop rows for
+ *  whichever category doesn't match byte-for-byte. */
+function categoryMatches(rawCategory: string | null, target: Category): boolean {
+  return normalizeCategoryString(rawCategory) === normalizeCategoryString(target);
+}
+
 function computeSellThroughFromLots(lots: LotRow[], category: Category): number | null {
-  const filtered = category === 'Company' ? lots : lots.filter((l) => l.category === category);
+  const filtered = category === 'Company' ? lots : lots.filter((l) => categoryMatches(l.category, category));
   if (filtered.length === 0) return null;
   const sold = filtered.filter((l) => l.sold === true).length;
   return (sold / filtered.length) * 100;
 }
 
 function computeVendorCommissionFromLots(lots: LotRow[], category: Category): number | null {
-  const filtered = (category === 'Company' ? lots : lots.filter((l) => l.category === category)).filter(
+  const filtered = (category === 'Company' ? lots : lots.filter((l) => categoryMatches(l.category, category))).filter(
     (l) => l.sold === true
   );
   if (filtered.length === 0) return null;
@@ -190,7 +203,7 @@ export async function fetchMarketShareSnapshot(quarter: string): Promise<Auction
   const lots = await fetchLotsForAuctions(auctionIds, 'category, sold, hammer_price');
 
   function summarize(filterCategory: Category | null) {
-    const filtered = filterCategory ? lots.filter((l) => l.category === filterCategory) : lots;
+    const filtered = filterCategory ? lots.filter((l) => categoryMatches(l.category, filterCategory)) : lots;
     const lotsOffered = filtered.length;
     const hammerValue = filtered
       .filter((l) => l.sold === true)
