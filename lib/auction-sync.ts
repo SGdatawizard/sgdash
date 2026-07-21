@@ -7,10 +7,10 @@ import { CATEGORIES } from './types';
  * dashboard. Confirmed schema (from sg-auctions/src/lib/types/database.ts):
  *
  *   auctions: id, date, auction_category, total_lots, lots_sold, ...
- *   lots:     id, auction_id, category ('Stamps' | 'Coins' | 'Pop Culture'),
- *             sold (boolean), hammer_price (numeric), commission_rate
- *             (text, e.g. "10%" — see parseCommissionRate in
- *             sg-auctions/src/app/dashboard/analytics/financials/page.tsx,
+ *   lots:     id, auction_id, category (a real ~65-value taxonomy — see
+ *             CATEGORY_MAP below), sold (boolean), hammer_price (numeric),
+ *             commission_rate (text, e.g. "10%" — see parseCommissionRate
+ *             in sg-auctions/src/app/dashboard/analytics/financials/page.tsx,
  *             which this mirrors)
  */
 
@@ -81,30 +81,102 @@ async function fetchLotsForAuctions(auctionIds: string[], columns: string): Prom
   return results;
 }
 
-function normalizeCategoryString(raw: string | null): string {
-  return (raw ?? '').trim().toLowerCase();
+/**
+ * sg-auctions doesn't store lots under "Stamps"/"Coins"/"Pop Culture" —
+ * it uses a much finer real-world taxonomy (confirmed via /api/debug-data
+ * against the live table: ~65 distinct values). This maps each raw
+ * category string to one of our three business categories. Anything not
+ * listed here (chiefly the Medals & Militaria sub-categories, and a
+ * handful of generic "Miscellaneous" ones) is deliberately left
+ * unmapped — those lots still count toward the Company-wide total
+ * (which doesn't filter by category at all) but are excluded from the
+ * Stamps/Coins/Pop Culture breakdowns until there's a decision on where
+ * they belong.
+ */
+const CATEGORY_MAP: Record<string, Category> = {
+  // Stamps
+  stamps: 'Stamps',
+  'british commonwealth stamps': 'Stamps',
+  'postal history': 'Stamps',
+  'gb stamps': 'Stamps',
+  'british commonwealth postal history': 'Stamps',
+  'gb postal history': 'Stamps',
+  'worldwide stamps': 'Stamps',
+  'gb collections': 'Stamps',
+  'british commonwealth collections': 'Stamps',
+  'worldwide collections': 'Stamps',
+  'worldwide postal history': 'Stamps',
+  'books and ephemera': 'Stamps',
+  'ephemera, literature, other': 'Stamps',
+  magazines: 'Stamps',
+
+  // Coins
+  coins: 'Coins',
+  'british coins': 'Coins',
+  'world coins': 'Coins',
+  tokens: 'Coins',
+  'ancient coins': 'Coins',
+
+  // Pop Culture — trading card games, comics, animation/original art
+  'pokemon graded single': 'Pop Culture',
+  'magic the gathering ungraded single': 'Pop Culture',
+  'pokemon partial complete set': 'Pop Culture',
+  'pokemon sealed product': 'Pop Culture',
+  'sports trading cards': 'Pop Culture',
+  'magic the gathering sealed product': 'Pop Culture',
+  'magic the gathering partial complete set': 'Pop Culture',
+  'magic the gathering graded single': 'Pop Culture',
+  'magic the gathering complete set': 'Pop Culture',
+  'pokemon ungraded single': 'Pop Culture',
+  'pokemon complete set': 'Pop Culture',
+  'magic the gathering booster box sealed': 'Pop Culture',
+  'pokemon booster pack sealed': 'Pop Culture',
+  'pokemon miscellaneous': 'Pop Culture',
+  'magic the gathering booster pack sealed': 'Pop Culture',
+  'magic the gathering miscellaneous': 'Pop Culture',
+  'miscellaneous tcg': 'Pop Culture',
+  'pokemon booser box sealed': 'Pop Culture', // sic — typo present in source data
+  'magic the gathering': 'Pop Culture',
+  pokemon: 'Pop Culture',
+  'one piece graded single': 'Pop Culture',
+  'yu-gi-oh': 'Pop Culture',
+  'yu-gi-oh! partial complete set': 'Pop Culture',
+  'yu-gi-oh! complete set': 'Pop Culture',
+  'yu-gi-oh! booser box sealed': 'Pop Culture', // sic
+  'yu-gi-oh! booster pack sealed': 'Pop Culture',
+  'silver age (1956-1969)': 'Pop Culture',
+  'bronze age (1970-1985)': 'Pop Culture',
+  'modern age (1986-present)': 'Pop Culture',
+  'golden age (1938-1955)': 'Pop Culture',
+  'modern age (1980-present)': 'Pop Culture',
+  'bronze age (1970-1979)': 'Pop Culture',
+  'original art': 'Pop Culture',
+  'animation art': 'Pop Culture',
+};
+
+/** Maps a lot's raw sg-auctions category to our Stamps/Coins/Pop Culture
+ *  scheme, or null if it isn't in the map yet (Medals & Militaria,
+ *  generic "Miscellaneous", etc.) — those lots are excluded from
+ *  category-specific totals but still count toward Company. */
+function mapToBusinessCategory(raw: string | null): Category | null {
+  if (!raw) return null;
+  return CATEGORY_MAP[raw.trim().toLowerCase()] ?? null;
 }
 
-/** Matches a lot's raw category string against our canonical Category,
- *  ignoring case and surrounding whitespace. sg-auctions' own data entry
- *  isn't guaranteed to store "Pop Culture" with that exact casing/spacing
- *  every time, so an exact === comparison can silently drop rows for
- *  whichever category doesn't match byte-for-byte. */
-function categoryMatches(rawCategory: string | null, target: Category): boolean {
-  return normalizeCategoryString(rawCategory) === normalizeCategoryString(target);
+function lotMatchesCategory(lot: LotRow, category: Category): boolean {
+  if (category === 'Company') return true;
+  return mapToBusinessCategory(lot.category) === category;
 }
 
 function computeSellThroughFromLots(lots: LotRow[], category: Category): number | null {
-  const filtered = category === 'Company' ? lots : lots.filter((l) => categoryMatches(l.category, category));
+  const filtered = lots.filter((l) => lotMatchesCategory(l, category));
   if (filtered.length === 0) return null;
   const sold = filtered.filter((l) => l.sold === true).length;
   return (sold / filtered.length) * 100;
 }
 
 function computeVendorCommissionFromLots(lots: LotRow[], category: Category): number | null {
-  const filtered = (category === 'Company' ? lots : lots.filter((l) => categoryMatches(l.category, category))).filter(
-    (l) => l.sold === true
-  );
+  const filtered = lots.filter((l) => lotMatchesCategory(l, category)).filter((l) => l.sold === true);
   if (filtered.length === 0) return null;
   let totalHammer = 0;
   let totalCommission = 0;
@@ -203,7 +275,7 @@ export async function fetchMarketShareSnapshot(quarter: string): Promise<Auction
   const lots = await fetchLotsForAuctions(auctionIds, 'category, sold, hammer_price');
 
   function summarize(filterCategory: Category | null) {
-    const filtered = filterCategory ? lots.filter((l) => categoryMatches(l.category, filterCategory)) : lots;
+    const filtered = filterCategory ? lots.filter((l) => mapToBusinessCategory(l.category) === filterCategory) : lots;
     const lotsOffered = filtered.length;
     const hammerValue = filtered
       .filter((l) => l.sold === true)
