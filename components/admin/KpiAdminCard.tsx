@@ -263,6 +263,7 @@ function MarketShareSnapshot({ quarter }: { quarter: string }) {
 function TargetsEditor({ kpi, onChanged }: { kpi: KpiWithData; onChanged: () => void }) {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [savingCategory, setSavingCategory] = useState<Category | null>(null);
+  const [errors, setErrors] = useState<Record<string, string>>({});
 
   function draftFor(c: Category) {
     if (drafts[c] !== undefined) return drafts[c];
@@ -272,15 +273,23 @@ function TargetsEditor({ kpi, onChanged }: { kpi: KpiWithData; onChanged: () => 
 
   async function saveTarget(c: Category) {
     const val = draftFor(c);
-    if (val === '' || isNaN(Number(val))) return;
+    if (val === '' || isNaN(Number(val))) {
+      setErrors((e) => ({ ...e, [c]: 'Enter a number first.' }));
+      return;
+    }
     setSavingCategory(c);
+    setErrors((e) => ({ ...e, [c]: '' }));
     try {
-      await fetch(`/api/kpis/${kpi.id}/targets`, {
+      const res = await fetch(`/api/kpis/${kpi.id}/targets`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ category: c, targetValue: Number(val) }),
       });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error ?? `Save failed (${res.status})`);
       onChanged();
+    } catch (err) {
+      setErrors((e) => ({ ...e, [c]: (err as Error).message }));
     } finally {
       setSavingCategory(null);
     }
@@ -293,25 +302,28 @@ function TargetsEditor({ kpi, onChanged }: { kpi: KpiWithData; onChanged: () => 
       </div>
       <div className="space-y-2">
         {CATEGORIES.map((c) => (
-          <div key={c} className="flex items-center gap-2">
-            <span className="w-24 text-xs text-ink/60 shrink-0">{c}</span>
-            <input
-              value={draftFor(c)}
-              onChange={(e) => setDrafts((d) => ({ ...d, [c]: e.target.value }))}
-              inputMode="decimal"
-              placeholder="Not set"
-              className="flex-1 border border-line rounded-sm px-2.5 py-1.5 text-sm bg-canvas font-data"
-            />
-            <button
-              onClick={() => saveTarget(c)}
-              disabled={savingCategory === c}
-              className={clsx(
-                'text-[10px] uppercase tracking-wide2 px-3 py-1.5 rounded-sm shrink-0',
-                'bg-gold text-navy font-medium hover:bg-gold-light disabled:opacity-50'
-              )}
-            >
-              {savingCategory === c ? 'Saving…' : 'Save'}
-            </button>
+          <div key={c}>
+            <div className="flex items-center gap-2">
+              <span className="w-24 text-xs text-ink/60 shrink-0">{c}</span>
+              <input
+                value={draftFor(c)}
+                onChange={(e) => setDrafts((d) => ({ ...d, [c]: e.target.value }))}
+                inputMode="decimal"
+                placeholder="Not set"
+                className="flex-1 border border-line rounded-sm px-2.5 py-1.5 text-sm bg-canvas font-data"
+              />
+              <button
+                onClick={() => saveTarget(c)}
+                disabled={savingCategory === c}
+                className={clsx(
+                  'text-[10px] uppercase tracking-wide2 px-3 py-1.5 rounded-sm shrink-0',
+                  'bg-gold text-navy font-medium hover:bg-gold-light disabled:opacity-50'
+                )}
+              >
+                {savingCategory === c ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+            {errors[c] && <p className="text-xs text-bad mt-1 ml-[6.5rem]">{errors[c]}</p>}
           </div>
         ))}
       </div>
