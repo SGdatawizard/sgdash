@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAllKpis, createKpi } from '@/lib/kpi-service';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET() {
   const kpis = await getAllKpis();
-  return NextResponse.json(kpis);
+  return NextResponse.json(kpis, {
+    headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0' },
+  });
 }
 
 export async function POST(req: NextRequest) {

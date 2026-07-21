@@ -60,9 +60,10 @@ export async function GET() {
     .order('updated_at', { ascending: false })
     .limit(10);
 
-  return NextResponse.json({
+  const body = {
     dashboardProjectRef: projectRef(process.env.SUPABASE_URL),
     auctionProjectRef: projectRef(process.env.AUCTION_SUPABASE_URL),
+    checkedAt: new Date().toISOString(),
     counts: {
       kpis: kpisRes.count,
       entries: entriesRes.count,
@@ -76,5 +77,12 @@ export async function GET() {
     mostRecentEntries: recentEntries.data ?? [],
     mostRecentTargets: recentTargets.data ?? [],
     lotCategoryCountsInAuctionApp: lotCategoryCounts,
+  };
+
+  return NextResponse.json(body, {
+    headers: {
+      'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+      Pragma: 'no-cache',
+    },
   });
 }
