@@ -43,7 +43,7 @@ export default function DashboardTabs({ kpis }: { kpis: KpiWithData[] }) {
   }
 
   return (
-    <div className="mx-auto max-w-7xl px-6 md:px-10 py-10">
+    <div className="w-full px-6 md:px-10 lg:px-16 py-10">
       <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-6 mb-8">
         <div>
           <div className="text-[11px] uppercase tracking-wide2 text-gold-dark mb-1">2026 Business Plan</div>

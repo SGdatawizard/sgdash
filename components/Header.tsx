@@ -22,7 +22,7 @@ export default function Header() {
   return (
     <header>
       <div className="bg-paper border-b border-line">
-        <div className="mx-auto max-w-7xl px-6 md:px-10 py-4 flex items-center justify-between">
+        <div className="w-full px-6 md:px-10 lg:px-16 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="h-9 w-9 rounded-full border border-navy/30 flex items-center justify-center text-navy font-display text-sm">
               SG
@@ -40,7 +40,7 @@ export default function Header() {
       </div>
       <div className="perf perf-navy" aria-hidden />
       <div className="bg-navy">
-        <div className="mx-auto max-w-7xl px-6 md:px-10 h-12 flex items-center justify-between">
+        <div className="w-full px-6 md:px-10 lg:px-16 h-12 flex items-center justify-between">
           <nav className="flex items-center gap-8">
             {navItem('/', 'Dashboard')}
             {navItem('/admin', 'Data Entry')}

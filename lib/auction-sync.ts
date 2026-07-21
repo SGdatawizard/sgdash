@@ -12,24 +12,33 @@ import { CATEGORIES } from './types';
  *             (text, e.g. "10%" — see parseCommissionRate in
  *             sg-auctions/src/app/dashboard/analytics/financials/page.tsx,
  *             which this mirrors)
- *
- * lots.category matches our Category values exactly, so no mapping is
- * needed there. Quarters aren't stored directly — auctions only have a
- * `date` — so we convert "YYYY-Qn" to a date range and join through
- * auction_id to find the lots that fall in it.
  */
 
 export type SyncableKpi = 'sell-through-rate' | 'vendor-commission';
+const SYNCABLE_KPIS: SyncableKpi[] = ['sell-through-rate', 'vendor-commission'];
+
+interface LotRow {
+  category: string | null;
+  sold: boolean | null;
+  hammer_price: number | string | null;
+  commission_rate: string | null;
+}
 
 function quarterToDateRange(quarter: string): { start: string; end: string } {
   const match = quarter.match(/^(\d{4})-Q([1-4])$/);
   if (!match) throw new Error(`Unrecognised quarter format: "${quarter}"`);
   const year = Number(match[1]);
   const q = Number(match[2]);
-  const startMonth = (q - 1) * 3; // 0-indexed
+  const startMonth = (q - 1) * 3;
   const start = new Date(Date.UTC(year, startMonth, 1));
   const end = new Date(Date.UTC(year, startMonth + 3, 1));
   return { start: start.toISOString().slice(0, 10), end: end.toISOString().slice(0, 10) };
+}
+
+function dateStringToQuarter(dateStr: string): string {
+  const d = new Date(dateStr);
+  const q = Math.floor(d.getUTCMonth() / 3) + 1;
+  return `${d.getUTCFullYear()}-Q${q}`;
 }
 
 function parseCommissionRate(rate: string | null): number {
@@ -51,14 +60,11 @@ async function auctionIdsInQuarter(quarter: string): Promise<string[]> {
 }
 
 /** Paginated fetch of lots for a set of auctions — sg-auctions' own tables
- *  can be large enough that Supabase's default row cap applies, so this
- *  fetches in chunks the same way sg-auctions' own financials page does. */
-async function fetchLotsForAuctions(
-  auctionIds: string[],
-  columns: string
-): Promise<Record<string, unknown>[]> {
+ *  can be large enough that Supabase's default row cap applies. */
+async function fetchLotsForAuctions(auctionIds: string[], columns: string): Promise<LotRow[]> {
+  if (auctionIds.length === 0) return [];
   const pageSize = 1000;
-  const results: Record<string, unknown>[] = [];
+  const results: LotRow[] = [];
   let from = 0;
   while (true) {
     const { data, error } = await auctionSupabase
@@ -68,83 +74,110 @@ async function fetchLotsForAuctions(
       .range(from, from + pageSize - 1);
     if (error) throw error;
     if (!data || data.length === 0) break;
-    results.push(...(data as unknown as Record<string, unknown>[]));
+    results.push(...(data as unknown as LotRow[]));
     if (data.length < pageSize) break;
     from += pageSize;
   }
   return results;
 }
 
+function computeSellThroughFromLots(lots: LotRow[], category: Category): number | null {
+  const filtered = category === 'Company' ? lots : lots.filter((l) => l.category === category);
+  if (filtered.length === 0) return null;
+  const sold = filtered.filter((l) => l.sold === true).length;
+  return (sold / filtered.length) * 100;
+}
+
+function computeVendorCommissionFromLots(lots: LotRow[], category: Category): number | null {
+  const filtered = (category === 'Company' ? lots : lots.filter((l) => l.category === category)).filter(
+    (l) => l.sold === true
+  );
+  if (filtered.length === 0) return null;
+  let totalHammer = 0;
+  let totalCommission = 0;
+  for (const lot of filtered) {
+    const hammer = Number(lot.hammer_price) || 0;
+    const rate = parseCommissionRate(lot.commission_rate);
+    totalHammer += hammer;
+    totalCommission += hammer * rate;
+  }
+  if (totalHammer === 0) return null;
+  return (totalCommission / totalHammer) * 100;
+}
+
+// --- single metric, single category/quarter (used by the per-KPI "Pull latest" button) ---
+
 export async function fetchAuctionMetric(
   kpi: SyncableKpi,
   category: Category,
   quarter: string
 ): Promise<number | null> {
-  if (kpi === 'sell-through-rate') return fetchSellThroughRate(category, quarter);
-  if (kpi === 'vendor-commission') return fetchVendorCommission(category, quarter);
+  const auctionIds = await auctionIdsInQuarter(quarter);
+  const lots = await fetchLotsForAuctions(auctionIds, 'category, sold, hammer_price, commission_rate');
+  if (lots.length === 0) return null;
+  if (kpi === 'sell-through-rate') return computeSellThroughFromLots(lots, category);
+  if (kpi === 'vendor-commission') return computeVendorCommissionFromLots(lots, category);
   return null;
 }
 
-async function fetchSellThroughRate(category: Category, quarter: string): Promise<number | null> {
-  const auctionIds = await auctionIdsInQuarter(quarter);
-  if (auctionIds.length === 0) return null;
+// --- bulk sync: every syncable KPI, every category, every quarter with real data ---
 
-  let totalQuery = auctionSupabase
-    .from('lots')
-    .select('*', { count: 'exact', head: true })
-    .in('auction_id', auctionIds);
-  let soldQuery = auctionSupabase
-    .from('lots')
-    .select('*', { count: 'exact', head: true })
-    .in('auction_id', auctionIds)
-    .eq('sold', true);
-
-  if (category !== 'Company') {
-    totalQuery = totalQuery.eq('category', category);
-    soldQuery = soldQuery.eq('category', category);
-  }
-
-  const [{ count: totalCount, error: totalError }, { count: soldCount, error: soldError }] =
-    await Promise.all([totalQuery, soldQuery]);
-  if (totalError) throw totalError;
-  if (soldError) throw soldError;
-
-  if (!totalCount) return null;
-  return ((soldCount ?? 0) / totalCount) * 100;
+export interface SyncAllRow {
+  kpi: SyncableKpi;
+  category: Category;
+  quarter: string;
+  value: number;
 }
 
-async function fetchVendorCommission(category: Category, quarter: string): Promise<number | null> {
-  const auctionIds = await auctionIdsInQuarter(quarter);
-  if (auctionIds.length === 0) return null;
+/** Every quarter that has at least one auction on record, oldest first. */
+export async function listQuartersWithData(): Promise<string[]> {
+  const { data, error } = await auctionSupabase.from('auctions').select('date');
+  if (error) throw error;
+  const quarters = new Set<string>();
+  for (const row of data ?? []) {
+    if (row.date) quarters.add(dateStringToQuarter(row.date as string));
+  }
+  return Array.from(quarters).sort();
+}
 
-  const lots = await fetchLotsForAuctions(auctionIds, 'category, sold, hammer_price, commission_rate');
-  const soldLots = lots.filter((l) => l.sold === true && (category === 'Company' || l.category === category));
+/** Computes every KPI × category value for every quarter with data, fetching
+ *  each quarter's lots only once (not once per category/KPI) to keep this
+ *  fast even across a full auction history. Does not write anything — the
+ *  caller decides how to persist the results. */
+export async function computeAllAuctionMetrics(): Promise<{ quarters: string[]; rows: SyncAllRow[] }> {
+  const quarters = await listQuartersWithData();
+  const rows: SyncAllRow[] = [];
 
-  if (soldLots.length === 0) return null;
+  for (const quarter of quarters) {
+    const auctionIds = await auctionIdsInQuarter(quarter);
+    const lots = await fetchLotsForAuctions(auctionIds, 'category, sold, hammer_price, commission_rate');
+    if (lots.length === 0) continue;
 
-  let totalHammer = 0;
-  let totalCommission = 0;
-  for (const lot of soldLots) {
-    const hammer = Number(lot.hammer_price) || 0;
-    const rate = parseCommissionRate(lot.commission_rate as string | null);
-    totalHammer += hammer;
-    totalCommission += hammer * rate;
+    for (const category of CATEGORIES) {
+      const sellThrough = computeSellThroughFromLots(lots, category);
+      if (sellThrough !== null) {
+        rows.push({ kpi: 'sell-through-rate', category, quarter, value: sellThrough });
+      }
+      const vendorCommission = computeVendorCommissionFromLots(lots, category);
+      if (vendorCommission !== null) {
+        rows.push({ kpi: 'vendor-commission', category, quarter, value: vendorCommission });
+      }
+    }
   }
 
-  if (totalHammer === 0) return null;
-  // Blended commission rate earned, as a % of hammer value — matches
-  // Vendor Commission's unit ('%') and sg-auctions' own financials math.
-  return (totalCommission / totalHammer) * 100;
+  return { quarters, rows };
 }
+
+export { SYNCABLE_KPIS };
 
 // --- Market Share: hammer value & lots offered snapshot ---
 //
 // True "market share versus key competitors" needs an external
 // market-size benchmark sg-auctions doesn't have, so rather than fake a
 // percentage, this pulls the underlying numbers (hammer value, lots
-// offered) for the quarter — for the company overall and each category
-// — so whoever owns Market Share can see the same breakdown sg-auctions
-// shows and decide the figure to enter.
+// offered) for the quarter — company overall and each category — so
+// whoever owns Market Share can see the same breakdown sg-auctions
+// shows and decide the figure to enter by hand.
 
 export interface AuctionSnapshotRow {
   category: Category;
@@ -154,10 +187,6 @@ export interface AuctionSnapshotRow {
 
 export async function fetchMarketShareSnapshot(quarter: string): Promise<AuctionSnapshotRow[]> {
   const auctionIds = await auctionIdsInQuarter(quarter);
-  if (auctionIds.length === 0) {
-    return CATEGORIES.map((category) => ({ category, hammerValue: 0, lotsOffered: 0 }));
-  }
-
   const lots = await fetchLotsForAuctions(auctionIds, 'category, sold, hammer_price');
 
   function summarize(filterCategory: Category | null) {

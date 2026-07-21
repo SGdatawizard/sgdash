@@ -13,7 +13,7 @@ export default async function DashboardPage() {
         <DashboardTabs kpis={kpis} />
       </main>
       <footer className="border-t border-line py-6 mt-4">
-        <div className="mx-auto max-w-7xl px-6 md:px-10 text-[11px] text-ink/40 tracking-wide2 uppercase">
+        <div className="w-full px-6 md:px-10 lg:px-16 text-[11px] text-ink/40 tracking-wide2 uppercase">
           Stanley Gibbons Auctions &middot; Internal use only
         </div>
       </footer>

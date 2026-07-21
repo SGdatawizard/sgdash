@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import clsx from 'clsx';
 import type { Category, KpiWithData } from '@/lib/types';
-import { CATEGORIES, QUARTERS } from '@/lib/types';
+import { CATEGORIES, CURRENT_QUARTER, QUARTERS } from '@/lib/types';
 
 export default function KpiAdminCard({
   kpi,
@@ -14,7 +14,7 @@ export default function KpiAdminCard({
   onChanged: () => void;
   onDeleteKpi: (id: string) => void;
 }) {
-  const [quarter, setQuarter] = useState(QUARTERS[QUARTERS.length - 1]);
+  const [quarter, setQuarter] = useState(CURRENT_QUARTER);
   const [category, setCategory] = useState<Category>('Company');
   const [value, setValue] = useState('');
   const [note, setNote] = useState('');
